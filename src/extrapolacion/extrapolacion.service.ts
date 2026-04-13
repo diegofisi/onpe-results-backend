@@ -9,6 +9,9 @@ import {
   ResumenTodoEnUno,
   CandidatoResumenNacional,
   RegionResumen,
+  ResumenEstratificado,
+  CandidatoEstratificado,
+  RegionEstratificada,
 } from '../interfaces/onpe.interfaces';
 
 /**
@@ -451,6 +454,205 @@ export class ExtrapolacionService {
         factorCorreccionPoblacionFinita: Math.round(fpcNacional * 10000) / 10000,
       },
       regiones,
+      topCandidatos,
+      todosCandidatos,
+    };
+  }
+
+  /**
+   * ═══════════════════════════════════════════════════════════════
+   *  EXTRAPOLACIÓN ESTRATIFICADA POR REGIÓN
+   *
+   *  Corrige el sesgo urbano/rural al extrapolar CADA región
+   *  por separado y luego combinar los resultados ponderados.
+   *
+   *  Para cada región r:
+   *    p̂_r  = proporción del candidato en la región r
+   *    N_r  = total actas en la región r
+   *    n_r  = actas contadas en la región r
+   *    W_r  = N_r / N_total  (peso de la región)
+   *
+   *  Proporción nacional estratificada:
+   *    p̂_est = Σ (W_r × p̂_r)
+   *
+   *  Varianza estratificada (cada estrato con su propio FPC):
+   *    Var_est = Σ [ W_r² × (p̂_r(1 - p̂_r) / n_r) × ((N_r - n_r) / (N_r - 1)) ]
+   *
+   *  Margen de error:
+   *    ME_est = z × √(Var_est)
+   *
+   *  Ventaja: regiones con poco conteo (rurales) aportan más
+   *  incertidumbre, haciendo el intervalo más realista.
+   * ═══════════════════════════════════════════════════════════════
+   */
+  async resumenEstratificado(
+    nivelConfianza: number = 95,
+    topN: number = 7,
+  ): Promise<ResumenEstratificado> {
+    const z = Z_SCORES[nivelConfianza] || 1.96;
+
+    this.logger.log('Iniciando extrapolación ESTRATIFICADA...');
+    const datosCrudos = await this.onpeService.getTodosLosDepartamentos();
+
+    const datosCompletos = datosCrudos.filter(
+      (d) => d.totales && d.totales.totalActas != null && d.totales.totalActas > 0 && d.participantes,
+    );
+    this.logger.log(`Regiones válidas para estratificación: ${datosCompletos.length}`);
+
+    // ── 1. Totales nacionales ──
+    const totalActasNacional = datosCompletos.reduce((s, d) => s + d.totales.totalActas, 0);
+    const actasContabilizadasTotal = datosCompletos.reduce((s, d) => s + d.totales.contabilizadas, 0);
+    const totalVotosValidosContados = datosCompletos.reduce((s, d) => s + d.totales.totalVotosValidos, 0);
+    const totalVotosEmitidosContados = datosCompletos.reduce((s, d) => s + d.totales.totalVotosEmitidos, 0);
+    const porcentajeConteoNacional =
+      totalActasNacional > 0
+        ? Math.round((actasContabilizadasTotal / totalActasNacional) * 10000) / 100
+        : 0;
+
+    // ── 2. Info de regiones con peso ──
+    const regionesInfo: RegionEstratificada[] = datosCompletos.map(({ departamento, totales }) => {
+      const N_r = totales.totalActas;
+      const n_r = totales.contabilizadas;
+      return {
+        ubigeo: departamento.ubigeo,
+        nombre: departamento.nombre,
+        actasContabilizadas: n_r,
+        totalActas: N_r,
+        porcentajeConteo: N_r > 0 ? Math.round((n_r / N_r) * 10000) / 100 : 0,
+        pesoNacional: totalActasNacional > 0 ? Math.round((N_r / totalActasNacional) * 10000) / 10000 : 0,
+        fpcRegion: Math.round(this.calcularFPC(N_r, n_r) * 10000) / 10000,
+      };
+    });
+
+    // ── 3. Recopilar votos por candidato por región ──
+    // Map: candidatoKey -> { info, regiones: [{N_r, n_r, votos_r, totalVotosValidos_r}] }
+    const candidatosMap = new Map<
+      number,
+      {
+        nombreAgrupacionPolitica: string;
+        nombreCandidato: string;
+        totalVotosNacional: number;
+        regionData: Array<{
+          ubigeo: string;
+          N_r: number;
+          n_r: number;
+          votos_r: number;
+          totalVotosValidos_r: number;
+        }>;
+      }
+    >();
+
+    for (const { departamento, totales, participantes } of datosCompletos) {
+      for (const p of participantes) {
+        const existing = candidatosMap.get(p.codigoAgrupacionPolitica);
+        const regionEntry = {
+          ubigeo: departamento.ubigeo,
+          N_r: totales.totalActas,
+          n_r: totales.contabilizadas,
+          votos_r: p.totalVotosValidos,
+          totalVotosValidos_r: totales.totalVotosValidos,
+        };
+
+        if (existing) {
+          existing.totalVotosNacional += p.totalVotosValidos;
+          existing.regionData.push(regionEntry);
+        } else {
+          candidatosMap.set(p.codigoAgrupacionPolitica, {
+            nombreAgrupacionPolitica: p.nombreAgrupacionPolitica,
+            nombreCandidato: p.nombreCandidato,
+            totalVotosNacional: p.totalVotosValidos,
+            regionData: [regionEntry],
+          });
+        }
+      }
+    }
+
+    // ── 4. Calcular extrapolación estratificada ──
+    // También calculamos el margen simple para comparar
+    const fpcNacionalSimple = this.calcularFPC(totalActasNacional, actasContabilizadasTotal);
+
+    const todosCandidatos: CandidatoEstratificado[] = [];
+
+    for (const [, cand] of candidatosMap) {
+      // Porcentaje nacional observado (simple)
+      const pctNacionalSimple = totalVotosValidosContados > 0
+        ? (cand.totalVotosNacional / totalVotosValidosContados) * 100
+        : 0;
+
+      // ── Estratificado: p̂_est = Σ(W_r × p̂_r) ──
+      let pEstratificado = 0;
+      let varianzaEstratificada = 0;
+      let votosExtrapoladosEstratificado = 0;
+
+      for (const rd of cand.regionData) {
+        const W_r = totalActasNacional > 0 ? rd.N_r / totalActasNacional : 0;
+        const p_r = rd.totalVotosValidos_r > 0 ? rd.votos_r / rd.totalVotosValidos_r : 0;
+        const N_r = rd.N_r;
+        const n_r = rd.n_r;
+
+        // Proporción ponderada
+        pEstratificado += W_r * p_r;
+
+        // Varianza del estrato: W_r² × (p_r(1-p_r) / n_r) × FPC_r²
+        if (n_r > 0 && N_r > 1) {
+          const fpc_r_sq = (N_r - n_r) / (N_r - 1);
+          const var_r = W_r * W_r * (p_r * (1 - p_r) / n_r) * fpc_r_sq;
+          varianzaEstratificada += var_r;
+        }
+
+        // Votos extrapolados por región
+        const factorExpansion_r = n_r > 0 ? N_r / n_r : 1;
+        votosExtrapoladosEstratificado += Math.round(rd.votos_r * factorExpansion_r);
+      }
+
+      const pEstPorcentaje = pEstratificado * 100;
+      const meEstratificado = z * Math.sqrt(varianzaEstratificada) * 100;
+
+      // Margen simple para comparación
+      const pSimple = pctNacionalSimple / 100;
+      const meSimple = this.calcularMargenError(pSimple, actasContabilizadasTotal, totalActasNacional, z) * 100;
+
+      todosCandidatos.push({
+        posicion: 0,
+        nombreAgrupacionPolitica: cand.nombreAgrupacionPolitica,
+        nombreCandidato: cand.nombreCandidato,
+        totalVotosValidosNacional: cand.totalVotosNacional,
+        porcentajeVotosValidosNacional: Math.round(pctNacionalSimple * 1000) / 1000,
+        votosExtrapoladosEstratificado,
+        porcentajeEstratificado: Math.round(pEstPorcentaje * 1000) / 1000,
+        margenErrorEstratificado: Math.round(meEstratificado * 1000) / 1000,
+        porcentajeEstratificadoMin:
+          Math.round(Math.max(0, pEstPorcentaje - meEstratificado) * 1000) / 1000,
+        porcentajeEstratificadoMax:
+          Math.round(Math.min(100, pEstPorcentaje + meEstratificado) * 1000) / 1000,
+        margenErrorSimple: Math.round(meSimple * 1000) / 1000,
+        diferenciaMargen: Math.round((meEstratificado - meSimple) * 1000) / 1000,
+      });
+    }
+
+    todosCandidatos.sort((a, b) => b.porcentajeEstratificado - a.porcentajeEstratificado);
+    todosCandidatos.forEach((c, i) => (c.posicion = i + 1));
+
+    const topCandidatos = todosCandidatos.slice(0, topN);
+
+    return {
+      fechaCalculo: new Date().toISOString(),
+      nivelConfianza,
+      zScore: z,
+      metodo: 'Extrapolación Estratificada por Región',
+      descripcion:
+        'Cada región extrapola sus propios votos con su propio FPC. ' +
+        'Las varianzas se combinan ponderadas por peso regional (W_r = N_r/N_total). ' +
+        'Esto corrige el sesgo de que regiones urbanas se cuentan antes que las rurales, ' +
+        'produciendo intervalos de confianza más realistas.',
+      conteoNacional: {
+        actasContabilizadasTotal,
+        totalActasNacional,
+        porcentajeConteoNacional,
+        totalVotosValidosContados,
+        totalVotosEmitidosContados,
+      },
+      regiones: regionesInfo,
       topCandidatos,
       todosCandidatos,
     };

@@ -67,6 +67,29 @@ export class ExtrapolacionController {
   }
 
   /**
+   * GET /resultados/resumen-estratificado?confianza=95&top=7
+   *
+   * EXTRAPOLACIÓN ESTRATIFICADA POR REGIÓN:
+   * - Cada región extrapola por separado con su propio FPC
+   * - Las varianzas se combinan ponderadas por peso regional
+   * - Corrige el sesgo urbano/rural del conteo
+   * - Produce intervalos de confianza más realistas (más amplios)
+   *
+   * Query params:
+   *   - confianza: nivel de confianza (90, 95, 99). Default: 95
+   *   - top: cantidad de primeros candidatos destacados. Default: 7
+   */
+  @Get('resumen-estratificado')
+  async getResumenEstratificado(
+    @Query('confianza') confianza?: string,
+    @Query('top') top?: string,
+  ) {
+    const nivel = confianza ? parseInt(confianza, 10) : 95;
+    const topN = top ? parseInt(top, 10) : 7;
+    return this.extrapolacionService.resumenEstratificado(nivel, topN);
+  }
+
+  /**
    * GET /resultados/debug/:ubigeo
    *
    * Endpoint de diagnóstico: hace UNA sola llamada a la API de ONPE

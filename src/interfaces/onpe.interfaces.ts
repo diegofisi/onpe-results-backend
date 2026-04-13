@@ -131,3 +131,51 @@ export interface ResumenTodoEnUno {
   // Todos los candidatos
   todosCandidatos: CandidatoResumenNacional[];
 }
+
+// ── Resumen Estratificado (corrige sesgo urbano/rural) ──
+
+export interface RegionEstratificada {
+  ubigeo: string;
+  nombre: string;
+  actasContabilizadas: number;
+  totalActas: number;
+  porcentajeConteo: number;
+  pesoNacional: number; // W_r = N_r / N_total
+  fpcRegion: number;
+}
+
+export interface CandidatoEstratificado {
+  posicion: number;
+  nombreAgrupacionPolitica: string;
+  nombreCandidato: string;
+  // Datos observados (igual que el simple)
+  totalVotosValidosNacional: number;
+  porcentajeVotosValidosNacional: number;
+  // Extrapolación ESTRATIFICADA
+  votosExtrapoladosEstratificado: number;
+  porcentajeEstratificado: number;       // p̂ ponderado por región
+  margenErrorEstratificado: number;      // ME combinando varianzas regionales
+  porcentajeEstratificadoMin: number;
+  porcentajeEstratificadoMax: number;
+  // Comparación con el método simple
+  margenErrorSimple: number;
+  diferenciaMargen: number;              // estratificado - simple (positivo = más incertidumbre)
+}
+
+export interface ResumenEstratificado {
+  fechaCalculo: string;
+  nivelConfianza: number;
+  zScore: number;
+  metodo: string;
+  descripcion: string;
+  conteoNacional: {
+    actasContabilizadasTotal: number;
+    totalActasNacional: number;
+    porcentajeConteoNacional: number;
+    totalVotosValidosContados: number;
+    totalVotosEmitidosContados: number;
+  };
+  regiones: RegionEstratificada[];
+  topCandidatos: CandidatoEstratificado[];
+  todosCandidatos: CandidatoEstratificado[];
+}
