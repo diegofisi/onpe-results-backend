@@ -42,6 +42,11 @@ export class OnpeService {
     { ubigeo: '220000', nombre: 'TACNA' },
     { ubigeo: '230000', nombre: 'TUMBES' },
     { ubigeo: '250000', nombre: 'UCAYALI' },
+    { ubigeo: '910000', nombre: 'ÁFRICA' },
+    { ubigeo: '920000', nombre: 'AMÉRICA' },
+    { ubigeo: '930000', nombre: 'ASIA' },
+    { ubigeo: '940000', nombre: 'EUROPA' },
+    { ubigeo: '950000', nombre: 'OCEANÍA' },
   ];
 
   constructor() {

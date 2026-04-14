@@ -54,6 +54,10 @@ export class ExtrapolacionService {
 
   constructor(private readonly onpeService: OnpeService) {}
 
+  getDepartamentos() {
+    return this.onpeService.getDepartamentos();
+  }
+
   /**
    * Calcula el factor de corrección por población finita
    */
