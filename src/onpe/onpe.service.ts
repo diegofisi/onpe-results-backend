@@ -67,12 +67,16 @@ export class OnpeService {
     return this.departamentos;
   }
 
+  private esExtranjero(ubigeo: string): boolean {
+    return ubigeo.startsWith('9');
+  }
+
   async getTotales(ubigeo: string): Promise<TotalesData | null> {
     const url = `${BASE_URL}/resumen-general/totales`;
     const params = {
       idEleccion: ID_ELECCION,
       tipoFiltro: 'ubigeo_nivel_01',
-      idAmbitoGeografico: 1,
+      idAmbitoGeografico: this.esExtranjero(ubigeo) ? 2 : 1,
       idUbigeoDepartamento: ubigeo,
     };
 
@@ -100,7 +104,7 @@ export class OnpeService {
     const params = {
       idEleccion: ID_ELECCION,
       tipoFiltro: 'ubigeo_nivel_01',
-      idAmbitoGeografico: 1,
+      idAmbitoGeografico: this.esExtranjero(ubigeo) ? 2 : 1,
       idUbigeoDepartamento: ubigeo,
     };
 
