@@ -127,6 +127,10 @@ export class OnpeService {
     }
   }
 
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
   async getTodosLosDepartamentos(): Promise<
     Array<{
       departamento: DepartamentoItem;
@@ -134,20 +138,38 @@ export class OnpeService {
       participantes: ParticipanteData[];
     }>
   > {
-    const resultados = await Promise.allSettled(
-      this.departamentos.map(async (dep) => {
-        const [totales, participantes] = await Promise.all([
-          this.getTotales(dep.ubigeo),
-          this.getParticipantes(dep.ubigeo),
-        ]);
-        return { departamento: dep, totales, participantes };
-      }),
-    );
+    const BATCH_SIZE = 5;
+    const DELAY_MS = 300;
+    const validos: Array<{
+      departamento: DepartamentoItem;
+      totales: TotalesData;
+      participantes: ParticipanteData[];
+    }> = [];
 
-    const validos = resultados
-      .filter((r) => r.status === 'fulfilled')
-      .map((r: PromiseFulfilledResult<any>) => r.value)
-      .filter((r) => r.totales != null);
+    for (let i = 0; i < this.departamentos.length; i += BATCH_SIZE) {
+      const batch = this.departamentos.slice(i, i + BATCH_SIZE);
+      this.logger.log(`Fetch lote ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(this.departamentos.length / BATCH_SIZE)}: ${batch.map((d) => d.nombre).join(', ')}`);
+
+      const resultados = await Promise.allSettled(
+        batch.map(async (dep) => {
+          const [totales, participantes] = await Promise.all([
+            this.getTotales(dep.ubigeo),
+            this.getParticipantes(dep.ubigeo),
+          ]);
+          return { departamento: dep, totales, participantes };
+        }),
+      );
+
+      for (const r of resultados) {
+        if (r.status === 'fulfilled' && r.value.totales != null) {
+          validos.push(r.value);
+        }
+      }
+
+      if (i + BATCH_SIZE < this.departamentos.length) {
+        await this.delay(DELAY_MS);
+      }
+    }
 
     this.logger.log(`Regiones con datos válidos: ${validos.length}/${this.departamentos.length}`);
     return validos;
