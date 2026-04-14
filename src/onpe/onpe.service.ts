@@ -85,16 +85,16 @@ export class OnpeService {
       const data = response.data;
 
       if (typeof data === 'string') {
-        this.logger.warn(`Totales ${ubigeo}: recibió HTML`);
+        this.logger.warn(`Totales ${ubigeo}: recibió HTML (status=${response.status}, content-type=${response.headers['content-type']}, preview=${String(data).slice(0, 200)})`);
         return null;
       }
       if (!data?.data) {
-        this.logger.warn(`Totales vacío para ${ubigeo}`);
+        this.logger.warn(`Totales vacío para ${ubigeo}: ${JSON.stringify(data)}`);
         return null;
       }
       return data.data;
     } catch (error: any) {
-      this.logger.error(`Error totales ${ubigeo}: ${error?.message}`);
+      this.logger.error(`Error totales ${ubigeo}: status=${error?.response?.status} msg=${error?.message} headers=${JSON.stringify(error?.response?.headers || {})}`);
       return null;
     }
   }
@@ -113,7 +113,7 @@ export class OnpeService {
       const data = response.data;
 
       if (typeof data === 'string') {
-        this.logger.warn(`Participantes ${ubigeo}: recibió HTML`);
+        this.logger.warn(`Participantes ${ubigeo}: recibió HTML (status=${response.status}, content-type=${response.headers['content-type']}, preview=${String(data).slice(0, 200)})`);
         return [];
       }
       if (!data?.data || !Array.isArray(data.data)) {
